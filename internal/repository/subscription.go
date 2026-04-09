@@ -58,14 +58,31 @@ func (r *SubscriptionRepository) GetByID(ctx context.Context, id int) (*model.Su
 	return &sub, nil
 }
 
-func (r *SubscriptionRepository) List(ctx context.Context) ([]model.Subscription, error) {
+func (r *SubscriptionRepository) List(ctx context.Context, userID, serviceName string) ([]model.Subscription, error) {
 	query := `SELECT id, service_name, price, user_id, start_date, end_date, created_at, updated_at
-	           FROM subscriptions ORDER BY id`
+	           FROM subscriptions WHERE 1=1`
+	args := []interface{}{}
+	argIdx := 1
 
-	r.logger.Info("listing all subscriptions")
+	if userID != "" {
+		query += fmt.Sprintf(" AND user_id = $%d", argIdx)
+		args = append(args, userID)
+		argIdx++
+	}
+	if serviceName != "" {
+		query += fmt.Sprintf(" AND service_name = $%d", argIdx)
+		args = append(args, serviceName)
+	}
+
+	query += " ORDER BY id"
+
+	r.logger.Info("listing subscriptions",
+		zap.String("user_id", userID),
+		zap.String("service_name", serviceName),
+	)
 
 	var subs []model.Subscription
-	err := r.db.SelectContext(ctx, &subs, query)
+	err := r.db.SelectContext(ctx, &subs, query, args...)
 	if err != nil {
 		r.logger.Error("failed to list subscriptions", zap.Error(err))
 		return nil, fmt.Errorf("list subscriptions: %w", err)
@@ -119,40 +136,4 @@ func (r *SubscriptionRepository) Delete(ctx context.Context, id int) error {
 	}
 
 	return nil
-}
-
-func (r *SubscriptionRepository) TotalCost(ctx context.Context, startDate, endDate, userID, serviceName string) (int, error) {
-	query := `
-		SELECT COALESCE(SUM(price), 0)
-		FROM subscriptions
-		WHERE start_date >= $1 AND (end_date IS NULL OR end_date <= $2)`
-
-	args := []interface{}{startDate, endDate}
-	argIdx := 3
-
-	if userID != "" {
-		query += fmt.Sprintf(" AND user_id = $%d", argIdx)
-		args = append(args, userID)
-		argIdx++
-	}
-	if serviceName != "" {
-		query += fmt.Sprintf(" AND service_name = $%d", argIdx)
-		args = append(args, serviceName)
-	}
-
-	r.logger.Info("calculating total cost",
-		zap.String("start_date", startDate),
-		zap.String("end_date", endDate),
-		zap.String("user_id", userID),
-		zap.String("service_name", serviceName),
-	)
-
-	var total int
-	err := r.db.GetContext(ctx, &total, query, args...)
-	if err != nil {
-		r.logger.Error("failed to calculate total cost", zap.Error(err))
-		return 0, fmt.Errorf("total cost: %w", err)
-	}
-
-	return total, nil
 }

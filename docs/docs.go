@@ -17,7 +17,7 @@ const docTemplate = `{
     "paths": {
         "/api/v1/subscriptions": {
             "get": {
-                "description": "Get a list of all subscription records",
+                "description": "Get a list of all subscription records, optionally filtered",
                 "produces": [
                     "application/json"
                 ],
@@ -25,6 +25,20 @@ const docTemplate = `{
                     "subscriptions"
                 ],
                 "summary": "List all subscriptions",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Filter by user UUID",
+                        "name": "user_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by service name",
+                        "name": "service_name",
+                        "in": "query"
+                    }
+                ],
                 "responses": {
                     "200": {
                         "description": "OK",

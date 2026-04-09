@@ -9,17 +9,25 @@ import (
 	"go.uber.org/zap"
 
 	"subscription-service/internal/model"
-	"subscription-service/internal/repository"
 )
 
 var dateRegex = regexp.MustCompile(`^(0[1-9]|1[0-2])-\d{4}$`)
 
+// Repository defines the interface for subscription data access.
+type Repository interface {
+	Create(ctx context.Context, sub *model.Subscription) (*model.Subscription, error)
+	GetByID(ctx context.Context, id int) (*model.Subscription, error)
+	List(ctx context.Context, userID, serviceName string) ([]model.Subscription, error)
+	Update(ctx context.Context, id int, req *model.UpdateSubscriptionRequest) (*model.Subscription, error)
+	Delete(ctx context.Context, id int) error
+}
+
 type SubscriptionService struct {
-	repo   *repository.SubscriptionRepository
+	repo   Repository
 	logger *zap.Logger
 }
 
-func NewSubscriptionService(repo *repository.SubscriptionRepository, logger *zap.Logger) *SubscriptionService {
+func NewSubscriptionService(repo Repository, logger *zap.Logger) *SubscriptionService {
 	return &SubscriptionService{repo: repo, logger: logger}
 }
 
@@ -27,8 +35,8 @@ func (s *SubscriptionService) Create(ctx context.Context, req *model.CreateSubsc
 	if req.ServiceName == "" {
 		return nil, fmt.Errorf("service_name is required")
 	}
-	if req.Price <= 0 {
-		return nil, fmt.Errorf("price must be a positive integer")
+	if req.Price < 0 {
+		return nil, fmt.Errorf("price must be a non-negative integer")
 	}
 	if !dateRegex.MatchString(req.StartDate) {
 		return nil, fmt.Errorf("start_date must be in MM-YYYY format")
@@ -43,6 +51,13 @@ func (s *SubscriptionService) Create(ctx context.Context, req *model.CreateSubsc
 	if req.EndDate != "" {
 		if !dateRegex.MatchString(req.EndDate) {
 			return nil, fmt.Errorf("end_date must be in MM-YYYY format")
+		}
+		before, err := isDateBefore(req.EndDate, req.StartDate)
+		if err != nil {
+			return nil, err
+		}
+		if before {
+			return nil, fmt.Errorf("end_date must not be before start_date")
 		}
 		endDate = &req.EndDate
 	}
@@ -70,8 +85,8 @@ func (s *SubscriptionService) GetByID(ctx context.Context, id int) (*model.Subsc
 	return s.repo.GetByID(ctx, id)
 }
 
-func (s *SubscriptionService) List(ctx context.Context) ([]model.Subscription, error) {
-	return s.repo.List(ctx)
+func (s *SubscriptionService) List(ctx context.Context, userID, serviceName string) ([]model.Subscription, error) {
+	return s.repo.List(ctx, userID, serviceName)
 }
 
 func (s *SubscriptionService) Update(ctx context.Context, id int, req *model.UpdateSubscriptionRequest) (*model.Subscription, error) {
@@ -85,8 +100,17 @@ func (s *SubscriptionService) Update(ctx context.Context, id int, req *model.Upd
 	if req.EndDate != nil && !dateRegex.MatchString(*req.EndDate) {
 		return nil, fmt.Errorf("end_date must be in MM-YYYY format")
 	}
-	if req.Price != nil && *req.Price <= 0 {
-		return nil, fmt.Errorf("price must be a positive integer")
+	if req.Price != nil && *req.Price < 0 {
+		return nil, fmt.Errorf("price must be a non-negative integer")
+	}
+	if req.StartDate != nil && req.EndDate != nil {
+		before, err := isDateBefore(*req.EndDate, *req.StartDate)
+		if err != nil {
+			return nil, err
+		}
+		if before {
+			return nil, fmt.Errorf("end_date must not be before start_date")
+		}
 	}
 
 	return s.repo.Update(ctx, id, req)
@@ -106,11 +130,35 @@ func (s *SubscriptionService) TotalCost(ctx context.Context, startDate, endDate,
 	if !dateRegex.MatchString(endDate) {
 		return 0, fmt.Errorf("end_date must be in MM-YYYY format")
 	}
+
+	before, err := isDateBefore(endDate, startDate)
+	if err != nil {
+		return 0, err
+	}
+	if before {
+		return 0, fmt.Errorf("end_date must not be before start_date")
+	}
+
 	if userID != "" {
 		if _, err := uuid.Parse(userID); err != nil {
 			return 0, fmt.Errorf("user_id must be a valid UUID")
 		}
 	}
 
-	return s.repo.TotalCost(ctx, startDate, endDate, userID, serviceName)
+	subs, err := s.repo.List(ctx, userID, serviceName)
+	if err != nil {
+		return 0, err
+	}
+
+	var total int
+	for _, sub := range subs {
+		months, err := overlapMonths(sub.StartDate, sub.EndDate, startDate, endDate)
+		if err != nil {
+			s.logger.Error("failed to calculate overlap", zap.Error(err))
+			continue
+		}
+		total += sub.Price * months
+	}
+
+	return total, nil
 }

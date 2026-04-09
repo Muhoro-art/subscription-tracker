@@ -25,10 +25,10 @@ func (h *SubscriptionHandler) RegisterRoutes(r *gin.Engine) {
 	{
 		api.POST("/subscriptions", h.Create)
 		api.GET("/subscriptions", h.List)
+		api.GET("/subscriptions/total-cost", h.TotalCost)
 		api.GET("/subscriptions/:id", h.GetByID)
 		api.PUT("/subscriptions/:id", h.Update)
 		api.DELETE("/subscriptions/:id", h.Delete)
-		api.GET("/subscriptions/total-cost", h.TotalCost)
 	}
 }
 
@@ -91,14 +91,19 @@ func (h *SubscriptionHandler) GetByID(c *gin.Context) {
 
 // List godoc
 // @Summary List all subscriptions
-// @Description Get a list of all subscription records
+// @Description Get a list of all subscription records, optionally filtered
 // @Tags subscriptions
 // @Produce json
+// @Param user_id query string false "Filter by user UUID"
+// @Param service_name query string false "Filter by service name"
 // @Success 200 {array} model.Subscription
 // @Failure 500 {object} model.ErrorResponse
 // @Router /api/v1/subscriptions [get]
 func (h *SubscriptionHandler) List(c *gin.Context) {
-	subs, err := h.service.List(c.Request.Context())
+	userID := c.Query("user_id")
+	serviceName := c.Query("service_name")
+
+	subs, err := h.service.List(c.Request.Context(), userID, serviceName)
 	if err != nil {
 		h.logger.Error("failed to list subscriptions", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, model.ErrorResponse{Error: "internal server error"})

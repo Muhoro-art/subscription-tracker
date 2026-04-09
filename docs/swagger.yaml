@@ -73,7 +73,16 @@ info:
 paths:
   /api/v1/subscriptions:
     get:
-      description: Get a list of all subscription records
+      description: Get a list of all subscription records, optionally filtered
+      parameters:
+      - description: Filter by user UUID
+        in: query
+        name: user_id
+        type: string
+      - description: Filter by service name
+        in: query
+        name: service_name
+        type: string
       produces:
       - application/json
       responses:
